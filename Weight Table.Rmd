@@ -1,0 +1,190 @@
+---
+title: "Weigth and Survival"
+output: html_document
+date: "2023-07-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+```{r}
+library(readxl)
+library(tidyverse)
+library(psych)
+library(DescTools)
+library(car)
+library(stats)
+library(broom)
+library(dunn.test)
+library(stats)
+# Carga la librería openxlsx
+library(openxlsx)
+library(agricolae)
+library(DataExplorer)
+library(ggpattern)
+library(RcmdrMisc)
+```
+
+```{r}
+#+++++++++++++++++++++++++
+# Function to calculate the mean and the standard deviation
+  # for each group
+#+++++++++++++++++++++++++
+# data : a data frame
+# varname : the name of a column containing the variable
+  #to be summariezed
+# groupnames : vector of column names to be used as
+  # grouping variables
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+```
+
+# Weight graphs
+```{r}
+#Import data
+data <- read_excel("Weight_Filter.xlsx")
+head(data)
+
+```
+```{r}
+data <- data %>% mutate(Group=as.factor(Group),
+                        Gender=as.factor(Gender))
+data$Group<- factor(data$Group, levels = unique(c("NTC","WT","L115R","L116")))
+summary(data)
+str(data)
+```
+```{r}
+#Round months
+data$age_round <- round(data$Months,0)
+```
+
+
+```{r}
+# Define the age breakpoints and labels
+  #breakpoints <- seq(0, 20, by = 2)
+  #labels <- seq(2, 22, by = 2)
+
+# Create the "age_level" column using cut()
+  #data$age_level <- cut(data$age_round, breaks = c(breakpoints, Inf), labels = labels)
+
+#group ages
+data$age_level <- with(data, binVariable(Months, bins=2, method='natural', 
+  labels=c("≤2 months", "≥8months")))
+
+```
+
+
+```{r}
+mean_sem_data <- data %>% 
+  group_by(Gender, Group, age_level) %>% 
+  summarise(mean=mean(Weight_g,na.rm = TRUE),
+            SD=sd(Weight_g,na.rm = TRUE),
+            SEM=SD/sqrt(n()),
+            N=n())
+```
+
+
+
+
+```{r}
+p<- ggplot(data, aes(fill=age_level, y= Weight_g, x= Group))+
+  geom_bar(position="dodge",stat="identity")+
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2), alpha = 0.9, size = 2) +
+  facet_wrap(vars(Gender))+
+  theme_minimal()
+print(p)
+```
+
+
+```{r}
+q<- ggplot(data, aes(y= Weight_g, x= Group, fill=Gender))+
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2), alpha = 0.9, size = 2) +  # Separate jittered points by "Gender"
+  facet_wrap(vars(age_level)) +
+  theme_minimal()    
+
+
+print(q)
+```
+
+
+```{r}
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+# File path to save the plot
+   file_path <- paste0("plots/Weight_Mixed_boxplot.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+  
+  file_path <- paste0("plots/BoxPlot_Weight_boxplot.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = q, device = "pdf", width = 8, height = 6, units = "in")
+  
+```
+
+
+
+```{r}
+weight_test <- list()
+levels <- c("1.5","11","16")
+for(i in levels){
+#Group by age_levels
+data_weight<- data %>% 
+  filter(age_level==i)
+
+
+# Perform ANOVA
+anova_weight <- aov(Weight_g ~Group+Gender, data=data_weight)
+posthoc_result <- HSD.test(anova_weight, "Group")
+age_level=i
+weight_test[[i]] <- list(aov_results = broom::tidy(anova_weight, conf.int = TRUE), Group = Group, posthoc_results = posthoc_result, Age_level=age_level)
+}
+```
+```{r}
+data_weight<- data %>% 
+  group_by(age_level) %>% 
+  do(multitst = TukeyHSD(aov(Weight_g ~ Group+Gender, data=.)))
+```
+
+
+```{r}
+data_weight %>% tidy(multitst)
+  
+
+
+
+```
+
+```{r}
+# Carga la librería openxlsx
+library(openxlsx)
+
+
+dataframes <- c("mean_sem_data","data")
+
+# Crea un nuevo libro de Excel
+wb <- createWorkbook()
+
+# Agrega cada dataframe como una hoja en el libro
+for (df_name in dataframes) {
+  df <- get(df_name)  # Get the dataframe by its name
+  addWorksheet(wb, sheetName = df_name)
+  writeData(wb, sheet = df_name, x = df)
+}
+
+# Guarda el libro de Excel
+saveWorkbook(wb, file = "dataframes.xlsx", overwrite = TRUE)
+```

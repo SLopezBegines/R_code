@@ -1,0 +1,1073 @@
+---
+title: "OpenField"
+output:   
+  html_document:
+    code_folding: hide 
+    number_sections: true
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Libraries
+```{r}
+library(readxl)
+library(tidyverse)
+library(psych)
+library(DescTools)
+library(car)
+library(stats)
+library(broom)
+library(dunn.test)
+library(stats)
+library(ggpubr)
+library(rstatix)
+```
+
+
+# Loadind data
+```{r}
+
+data <- read_excel("Rotarod.xlsx")
+head(data)
+
+```
+
+```{r}
+data <- data %>% mutate(Idmice=as.factor(Idmice),
+                        Line=as.factor(Line),
+                        Genotype=as.factor(Genotype),
+                        Group=as.factor(Group),
+                        Gender=as.factor(Gender))
+```
+
+
+```{r}
+# Function to clean column names
+clean_column_names <- function(x) {
+  gsub(" ", "_", gsub("-", "_", gsub("___","_",x)))
+}
+
+# Apply the clean_column_names function to column names of the data frame
+colnames(data) <- clean_column_names(colnames(data))
+colnames(data) <- clean_column_names(colnames(data))#Run twice to complete conversion. It can be optimized.
+
+```
+
+```{r}
+colnames(data)
+# Convert "Group" to factor with specified order
+data$Group <- factor(data$Group, levels = c("NTC", "WT", "L115R", "L116"))
+str(data)
+```
+
+
+
+# Functions
+
+```{r}
+# Function to convert p-values to star scale
+convert_to_star <- function(p) {
+  if (p > 0.05) {
+    return("ns")
+  } else if (p <= 0.05 & p > 0.01) {
+    return("*")
+  } else if (p <= 0.01 & p > 0.001) {
+    return("**")
+  } else {
+    return("***")
+  }
+}
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+
+
+```
+
+
+# ANOVA
+
+## Grouping by Gender 
+### Homocedasticity by Gender
+
+```{r}
+aovdata <- data[, c(3,6, 8:17)]
+variables <- colnames(data[,8:17])
+# Assuming your dataframe is called 'aovdata', and the 'Gender' column contains the gender information
+# and all the numeric variables you mentioned are in the dataframe.
+
+# Filter numeric variables (excluding 'Group' and 'Gender' columns)
+numeric_vars <- names(aovdata)[!(names(aovdata) %in% c("Group", "Gender"))]
+
+# Gather the numeric variables into a tidy format
+aovdata_tidy <- aovdata %>%
+  select(Gender, all_of(numeric_vars)) %>%
+  pivot_longer(cols = -Gender, names_to = "Variable", values_to = "Value")
+
+# Convert the 'Gender' column to a factor (if it's not already)
+aovdata_tidy$Gender <- as.factor(aovdata_tidy$Gender)
+
+# Perform Levene test by gender for each numeric variable
+levene_results <- aovdata_tidy %>%
+  group_by(Variable) %>%
+  summarise(Levene_p_value = list(leveneTest(Value, group = Gender)$`Pr(>F)`), .groups = 'drop') %>%
+  unnest(Levene_p_value)
+# Filter out rows with NA in the Levene_p_value column
+levene_results_gender <- levene_results %>%
+  filter(!is.na(Levene_p_value))%>% 
+  arrange(Levene_p_value)
+
+
+levene_results_gender$StarScale <- sapply(levene_results_gender$Levene_p_value, convert_to_star)
+# View the results
+print(levene_results_gender)
+```
+The results of Levene Test by Gender said us that there are not differences in homogeneity of samples. We can apply the ANOVA test.  Let's see Normality
+
+### Normality by Gender 
+
+```{r}
+# Perform Shapiro-Wilk test for each numeric variable grouped by "Group" and "Gender"
+aovdata <- data[, c(3,6, 8:17)]
+# Group-wise Shapiro-Wilk test
+shapiro_test_gender <- aovdata %>%
+  group_by(Gender) %>%
+  summarize(across(where(function(x) length(unique(x)) > 1 && is.numeric(x)), ~ shapiro.test(.)$p.value, .names = "{.col}")) %>%
+  ungroup()
+shapiro_test_gender<-as.data.frame(t(shapiro_test_gender))
+
+# Rename columns V1 and V2 to Females and Males
+colnames(shapiro_test_gender)[colnames(shapiro_test_gender) == "V1"] <- "Females"
+colnames(shapiro_test_gender)[colnames(shapiro_test_gender) == "V2"] <- "Males"
+
+# Format the values in scientific notation to regular numeric format
+shapiro_test_gender$Females <- format(as.numeric(shapiro_test_gender$Females), scientific = FALSE)
+shapiro_test_gender$Males <- format(as.numeric(shapiro_test_gender$Males), scientific = FALSE)
+# Add a new column for the test result
+shapiro_test_gender$Significance_Females <- ifelse(shapiro_test_gender$Females < 0.05, "Non-Normal", "Normal")
+shapiro_test_gender$Significance_Males <- ifelse(shapiro_test_gender$Males < 0.05, "Non-Normal", "Normal")
+# Remove the "Gender" row
+shapiro_test_gender <- shapiro_test_gender[!(row.names(shapiro_test_gender) %in% c("Gender")),]
+# Arrange the values by Females in ascending order
+shapiro_test_gender <- shapiro_test_gender[order(shapiro_test_gender$Females), ]
+# Add row names as a new column to the data frame
+shapiro_test_gender <- shapiro_test_gender %>% rownames_to_column(var = "Variable")
+
+shapiro_test_gender$StarScaleMale <- sapply(shapiro_test_gender$Males, convert_to_star)
+shapiro_test_gender$StarScaleFemale <- sapply(shapiro_test_gender$Females, convert_to_star)
+# View the result
+print(shapiro_test_gender)
+
+#Group variables if pass or not normality
+
+# Get variables that are not significant for both Males and Females
+significant_males <- shapiro_test_gender %>%
+  filter(Significance_Males == "Non-Normal") %>% 
+  pull(Variable)
+# Get variables that are not significant for both Males and Females
+not_significant_males <- shapiro_test_gender %>%
+  filter(Significance_Males == "Normal") %>% 
+  pull(Variable)
+# Get variables that are not significant for both Males and Females
+significant_females <- shapiro_test_gender %>%
+  filter(Significance_Females == "Non-Normal") %>% 
+  pull(Variable)
+# Get variables that are not significant for both Males and Females
+not_significant_females <- shapiro_test_gender %>%
+  filter(Significance_Females == "Normal") %>% 
+  pull(Variable)
+```
+
+
+
+## Males ANOVA
+
+```{r}
+# Load required libraries (make sure you have installed 'broom' and 'dplyr' packages)
+library(dplyr)
+library(broom)
+
+```
+
+
+```{r}
+# Assuming your original data frame is named 'data', select relevant columns
+aovdata <- data[, c(3,6, 8:17)]
+
+# Convert "Group" and "Gender" to factors
+aovdata$Group <- as.factor(aovdata$Group)
+aovdata$Gender <- as.factor(aovdata$Gender)
+
+# Initialize an empty list to store ANOVA or Kruskal-Wallis results
+male_aovlist <- list()
+
+male_data <- aovdata %>% filter(Gender == "Male")
+
+for (col in names(male_data)[3:ncol(male_data)]) {
+      variable <- col
+    formula <- as.formula(paste0("`", col, "`"," ~ Group"))
+  
+  # Check for normality assumption using Shapiro-Wilk test
+  if (shapiro.test(male_data[[col]])$p.value >= 0.05) {
+    #Include Levene Test here
+    res.aov <- aov(formula, data = male_data)
+    data_input <- data.frame("Group"=male_data$Group, "Gender"=male_data$Gender,male_data[[col]])
+    names(data_input)[3]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc<- posthoc %>% add_y_position()
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin+0.2
+    posthoc$xmax<- posthoc$xmax+0.2
+    
+    #pair_compared <- rownames(posthoc$`Group`)
+  } else {
+    res.aov <- kruskal.test(formula, data = male_data)
+    data_input <- data.frame("Group"=male_data$Group, "Gender"=male_data$Gender,male_data[[col]])
+    names(data_input)[3]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% dunn_test(formula)
+    test_type <- "Kruskal-Wallis"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc<- posthoc %>% add_y_position()
+    posthoc$xmin<- posthoc$xmin+0.2
+    posthoc$xmax<- posthoc$xmax+0.2
+    #pair_compared <- posthoc$comparison
+  }
+  male_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+male_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(male_aovlist)) {
+  test_result <- male_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    
+    
+  } else if (grepl("Kruskal-Wallis", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value
+  }
+  
+  # Combine the results into a data frame
+  male_aov_results_df <- rbind(male_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#male_aov_results_df$StarScale <- sapply(male_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+male_aov_results_df$Gender <- "Male"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(male_aov_results_df$Comparison.Comparison, split = "-")
+
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+male_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+male_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(male_aov_results_df) <- gsub("Comparison\\.", "", colnames(male_aov_results_df))
+
+male_aov_results_df<- male_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(male_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+male_significant_vars <- subset(male_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(male_significant_vars))
+rownames(male_significant_vars) <- new_row_names
+
+print(male_significant_vars)
+
+```
+
+
+
+
+## Females ANOVA
+
+```{r}
+# Assuming your original data frame is named 'data', select relevant columns
+aovdata <- data[, c(3,6, 8:17)]
+
+# Convert "Group" and "Gender" to factors
+aovdata$Group <- as.factor(aovdata$Group)
+aovdata$Gender <- as.factor(aovdata$Gender)
+
+# Initialize an empty list to store ANOVA or Kruskal-Wallis results
+female_aovlist <- list()
+
+female_data <- aovdata %>% filter(Gender == "Female")
+
+for (col in names(female_data)[3:ncol(female_data)]) {
+      variable <- col
+    formula <- as.formula(paste0("`", col, "`"," ~ Group"))
+  
+  # Check for normality assumption using Shapiro-Wilk test
+  if (shapiro.test(female_data[[col]])$p.value >= 0.05) {
+    #Include Levene Test here
+    res.aov <- aov(formula, data = female_data)
+    data_input <- data.frame("Group"=female_data$Group, "Gender"=female_data$Gender,female_data[[col]])
+    names(data_input)[3]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_xy_position(dodge = 0.8)
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin-0.2
+    posthoc$xmax<- posthoc$xmax-0.2
+    #pair_compared <- rownames(posthoc$`Group`)
+  } else {
+    res.aov <- kruskal.test(formula, data = female_data)
+    data_input <- data.frame("Group"=female_data$Group, "Gender"=female_data$Gender,female_data[[col]])
+    names(data_input)[3]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% dunn_test(formula)
+    test_type <- "Kruskal-Wallis"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc<- posthoc %>% add_xy_position(dodge = 0.8)
+    posthoc$xmin<- posthoc$xmin-0.2
+    posthoc$xmax<- posthoc$xmax-0.2
+    #pair_compared <- posthoc$comparison
+  }
+  female_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+female_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(female_aovlist)) {
+  test_result <- female_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    
+    
+  } else if (grepl("Kruskal-Wallis", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value
+  }
+  
+  # Combine the results into a data frame
+  female_aov_results_df <- rbind(female_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#female_aov_results_df$StarScale <- sapply(female_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+female_aov_results_df$Gender <- "Female"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(female_aov_results_df$Comparison.Comparison, split = "-")
+
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+female_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+female_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(female_aov_results_df) <- gsub("Comparison\\.", "", colnames(female_aov_results_df))
+
+female_aov_results_df<- female_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(female_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+female_significant_vars <- subset(female_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(female_significant_vars))
+rownames(female_significant_vars) <- new_row_names
+
+print(female_significant_vars)
+
+```
+
+
+## Grouping by Group
+
+### Normality by Group
+
+```{r}
+# Perform Shapiro-Wilk test for each numeric variable grouped by "Group" 
+aovdata <- data[, c(3,6, 8:17)]
+shapiro_test_group <- aovdata %>%
+  group_by(Group) %>%
+  summarize(across(where(function(x) length(unique(x)) > 1 && is.numeric(x)), ~ shapiro.test(.)$p.value, .names = "{.col}")) %>%
+  ungroup()
+shapiro_test_group<-as.data.frame(t(shapiro_test_group))
+
+# Rename columns V1 and V2 to Females and Males
+colnames(shapiro_test_group)[colnames(shapiro_test_group) == "V1"] <- "NTC"
+colnames(shapiro_test_group)[colnames(shapiro_test_group) == "V2"] <- "WT"
+colnames(shapiro_test_group)[colnames(shapiro_test_group) == "V3"] <- "L115R"
+colnames(shapiro_test_group)[colnames(shapiro_test_group) == "V4"] <- "L116"
+
+# Format the values in scientific notation to regular numeric format
+shapiro_test_group$NTC <- format(as.numeric(shapiro_test_group$NTC), scientific = FALSE)
+shapiro_test_group$WT <- format(as.numeric(shapiro_test_group$WT), scientific = FALSE)
+shapiro_test_group$L115R <- format(as.numeric(shapiro_test_group$L115R), scientific = FALSE)
+shapiro_test_group$L116 <- format(as.numeric(shapiro_test_group$L116), scientific = FALSE)
+
+
+# Add a new column for the test result
+shapiro_test_group$Significance <- ifelse(shapiro_test_group$NTC < 0.05|shapiro_test_group$WT< 0.05|shapiro_test_group$L115R <0.05|shapiro_test_group$L116<0.05, "Non-Normal", "Normal")
+shapiro_test_group$Significance_NTC <- ifelse(shapiro_test_group$NTC < 0.05, "Non-Normal", "Normal")
+shapiro_test_group$Significance_WT <- ifelse(shapiro_test_group$WT < 0.05, "Non-Normal", "Normal")
+shapiro_test_group$Significance_L115R <- ifelse(shapiro_test_group$L115R < 0.05, "Non-Normal", "Normal")
+shapiro_test_group$Significance_L116 <- ifelse(shapiro_test_group$L116 < 0.05, "Non-Normal", "Normal")
+
+# Remove the "Gender" row
+shapiro_tes_group <- shapiro_test_group[!(row.names(shapiro_test_group) %in% c("Group")),]
+# Arrange the values by Females in ascending order
+shapiro_test_group <- shapiro_test_group[order(shapiro_test_group$NTC), ]
+# Add row names as a new column to the data frame
+shapiro_test_group <- shapiro_test_group %>% rownames_to_column(var = "Variable")
+# View the result
+print(shapiro_test_group)
+
+# Get variables that are not significant for both Males and Females
+not_significant_group <- shapiro_test_group %>%
+  filter(Significance == "Non-Normal") %>% 
+  pull(Variable)
+# Get variables that are not significant for both Males and Females
+significant_group <- shapiro_test_group %>%
+  filter(Significance == "Normal") %>% 
+  pull(Variable)
+```
+## Mixed ANOVA
+
+```{r}
+# Assuming your original data frame is named 'data', select relevant columns
+aovdata <- data[, c(3,6, 8:17)]
+
+# Convert "Group" and "Gender" to factors
+aovdata$Group <- as.factor(aovdata$Group)
+aovdata$Gender <- as.factor(aovdata$Gender)
+
+# Initialize an empty list to store ANOVA or Kruskal-Wallis results
+aovlist <- list()
+
+
+for (col in names(aovdata)[3:ncol(aovdata)]) {
+      variable <- col
+    formula <- as.formula(paste0("`", col, "`"," ~ Group"))
+  
+  # Check for normality assumption using Shapiro-Wilk test
+  if (shapiro.test(aovdata[[col]])$p.value >= 0.05) {
+    #Include Levene Test here
+    res.aov <- aov(formula, data = aovdata)
+    data_input <- data.frame("Group"=aovdata$Group, "Gender"=aovdata$Gender,aovdata[[col]])
+    names(data_input)[3]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_xy_position()
+    test_type <- "ANOVA"
+    Group <- aovdata$Group
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    #pair_compared <- rownames(posthoc$`Group`)
+  } else {
+    res.aov <- kruskal.test(formula, data = aovdata)
+    data_input <- data.frame("Group"=aovdata$Group, "Gender"=aovdata$Gender,aovdata[[col]])
+    names(data_input)[3]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% dunn_test(formula)
+    test_type <- "Kruskal-Wallis"
+    Group <- aovdata$Group
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc<- posthoc %>% add_xy_position()
+    #pair_compared <- posthoc$comparison
+  }
+ aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), Group = Group, posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(aovlist)) {
+  test_result <- aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"=test_result$posthoc_results$xmin,
+                              "xmax" = test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    
+    
+  } else if (grepl("Kruskal-Wallis", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"=test_result$posthoc_results$xmin,
+                              "xmax" = test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value
+  }
+  
+  # Combine the results into a data frame
+  aov_results_df <- rbind(aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#male_aov_results_df$StarScale <- sapply(male_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+aov_results_df$Gender <- "Male"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(aov_results_df$Comparison.Comparison, split = "-")
+
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(aov_results_df) <- gsub("Comparison\\.", "", colnames(aov_results_df))
+
+aov_results_df<- aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+significant_vars <- subset(aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(significant_vars))
+rownames(significant_vars) <- new_row_names
+
+print(significant_vars)
+
+```
+
+
+
+## ANOVA Males vs Females
+```{r}
+# Assuming your original data frame is named 'data', select relevant columns
+aovdata <- data[, c(3,6, 8:17)]
+
+# Convert "Group" and "Gender" to factors
+aovdata$Group <- as.factor(aovdata$Group)
+aovdata$Gender <- as.factor(aovdata$Gender)
+
+# Initialize an empty list to store ANOVA or Kruskal-Wallis results
+aovlist <- list()
+grupos <- c("NTC","WT","L115R","L116")
+
+for(i in 1:length(grupos)){
+mixed_data <- aovdata %>% filter(Group == grupos[i])
+  #males_data <-mixed_data %>%  filter(Gender == "Male") %>%  select(names(mixed_data)[3:ncol(mixed_data)])
+  #females_data <-mixed_data %>%  filter(Gender == "Female") %>%  select(names(mixed_data)[3:ncol(mixed_data)])
+  group<- grupos[i]
+   # Create a new list for each group
+  group_result <- list()
+for (col in names(mixed_data)[3:ncol(mixed_data)]) {
+  formula <- as.formula(paste0("`", col, "`"," ~ Gender"))
+  # Check for normality assumption using Shapiro-Wilk test
+  if (shapiro.test(mixed_data[[col]])$p.value >= 0.05) {
+    #Include Levene Test here
+    #group<- grupos[i]
+    variable <- col
+    t_test_result <- mixed_data%>% t_test(formula) %>% add_significance()
+    #test_type <- "T-Test"
+    #t_test_result<- t_test_result %>% add_x_position(dodge = 0.8)
+    t_test_result<- t_test_result %>% add_y_position()
+    t_test_result <- t_test_result %>% add_x_position()
+    
+    t_test_result <- t_test_result %>% mutate(Test_type = "T-Test",
+                                              Group_dif = grupos[i],
+                                              xmin = case_when(
+                                                Group_dif == "NTC"~0.8,
+                                                Group_dif == "WT"~1.8,
+                                                Group_dif == "L115R"~2.8,
+                                                Group_dif == "L116"~3.8),
+                                              xmax = case_when(
+                                                Group_dif == "NTC"~1.2,
+                                                Group_dif == "WT"~2.2,
+                                                Group_dif == "L115R"~3.2,
+                                                Group_dif == "L116"~4.2))
+    #Modif x position
+  } else {
+    #group<- grupos[i]
+    variable <- col
+    t_test_result <- mixed_data%>% wilcox_test(formula) %>% add_significance()
+    #test_type <- "Mann-Whitney"
+    t_test_result <- t_test_result %>% add_y_position()
+    t_test_result <- t_test_result %>% add_x_position()
+    
+    t_test_result <- t_test_result %>% mutate(Test_type = "Mann-Whitney",
+                                              Group_dif = grupos[i],
+                                              df = "df",
+                                              xmin = case_when(
+                                                Group_dif == "NTC"~0.8,
+                                                Group_dif == "WT"~1.8,
+                                                Group_dif == "L115R"~2.8,
+                                                Group_dif == "L116"~3.8),
+                                              xmax = case_when(
+                                                Group_dif == "NTC"~1.2,
+                                                Group_dif == "WT"~2.2,
+                                                Group_dif == "L115R"~3.2,
+                                                Group_dif == "L116"~4.2))
+    #Modif x position
+  }
+  #group_result[[col]] <- list(results = t_test_result,Test_Type = test_type, Group= group)
+  group_result[[col]] <- list(results = t_test_result)
+  
+}
+  aovlist[[group]] <- group_result
+}
+```
+
+
+
+```{r}
+# Create empty data frame to store the results
+aov_results_df_sex <- data.frame()
+# Loop through the list of test results
+for (i in seq_along(aovlist)) {
+  group <- aovlist[[i]]
+  
+  for (j in seq_along(group)){
+  variable <- group[[j]]$results
+  # Append the row to the aov_results_df
+  aov_results_df_sex <- rbind(aov_results_df_sex, variable)
+}
+}
+# Print the dataframe
+print(aov_results_df_sex)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+significant_vars_sex <- subset(aov_results_df_sex, p < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(significant_vars_sex))
+rownames(significant_vars_sex) <- new_row_names
+print(significant_vars_sex)
+```
+### Combine by sex results
+
+```{r}
+#Combine both dataframes
+
+both_aov_results_df <- rbind(male_aov_results_df, female_aov_results_df)
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(aov_results_df$Variable)
+# Convert the "Variable" column to a factor with the desired order
+both_aov_results_df$Variable <- factor(both_aov_results_df$Variable, levels = desired_order)
+##Attach statistical differences between gender
+#Change name of columns
+```
+
+
+```{r}
+
+names(aov_results_df_sex) <- c("Variable","group1","group2","n1","n2","P_Value","df","p_value_adj", "p.adj.signif", "y.position", "Comparison","xmin" ,"xmax","Test_Type", "Group_dif")
+# Change "Comparison" value from c("Female","Male") to Male-Female
+aov_results_df_sex$Comparison<- "Male-Female"
+#Change positions of columnas
+
+selected_cols_bysex <- aov_results_df_sex %>% 
+  select(Variable, Test_Type, Comparison, p_value_adj, p.adj.signif, y.position ,xmin, xmax,P_Value, Group_dif, group1, group2)
+
+both_aov_results_df <- bind_rows(both_aov_results_df,selected_cols_bysex)
+
+
+both_aov_results_df
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+both_significant_vars <- subset(both_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(both_significant_vars))
+rownames(both_significant_vars) <- new_row_names
+
+both_significant_vars
+
+```
+
+
+
+# Plots by sex
+
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot <- colnames(aovdata[,3:12])
+#Compute comparison groups
+my_comparisons <- list(c("NTC","WT"),c("NTC","L115R"),c("NTC","L116"),c("WT","L115R"),c("WT","L116"),c("L115R","L116"))
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+both_aov_results_df$Variable <- factor(both_aov_results_df$Variable, levels = desired_order)
+both_dataframe_list <- both_aov_results_df %>%  group_split(Variable)
+
+# Boxplot
+
+suppressWarnings(
+for (i in 1:length(varsplot)){
+#data_males <- as.data.frame(males_dataframe_list[[i]])
+#data_females <- as.data.frame(females_dataframe_list[[i]])
+data_both <- as.data.frame(both_dataframe_list[[i]])  
+#data_both_significant <- as.data.frame(both_significant_list[[i]])
+if(all(data_both$p.adj.signif=="ns")){
+p<-ggplot(data=aovdata, aes(x = Group, 
+                            y = .data[[varsplot[i]]], 
+                            fill = Gender)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2), alpha = 0.9, size = 2) +  # Separate jittered points by "Gender"
+  labs(x = "Group", 
+       y = varsplot[i]) +
+  ggtitle(paste0("Boxplot of ", varsplot[i])) +
+  theme_minimal()+
+  coord_cartesian(ylim = c(0, NA))
+
+}else{
+  p<-ggplot(data=aovdata, aes(x = Group, 
+                            y = .data[[varsplot[i]]], 
+                            fill = Gender)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2), alpha = 0.9, size = 2) +  # Separate jittered points by "Gender"
+  labs(x = "Group", 
+       y = varsplot[i]) +
+  ggtitle(paste0("Boxplot of ", varsplot[i])) +
+  theme_minimal()+
+  coord_cartesian(ylim = c(0, NA))+
+    stat_pvalue_manual(data_both, 
+                       label = "p.adj.signif", 
+                       hide.ns=TRUE, 
+                       y.position = "y.position", 
+                       step.increase = 0.1,
+                       xmin = "xmin", 
+                       xmax = "xmax", 
+                       dodge=0.8)
+}
+
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+})
+```
+
+
+
+# Plots mixed
+
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot <- colnames(aovdata[,3:12])
+#Compute comparison groups
+my_comparisons <- list(c("NTC","WT"),c("NTC","L115R"),c("NTC","L116"),c("WT","L115R"),c("WT","L116"),c("L115R","L116"))
+
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+aov_results_df$Variable <- factor(aov_results_df$Variable, levels = desired_order)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list <- aov_results_df %>%  group_split(Variable)
+```
+
+
+```{r}
+# Boxplot
+for (i in 1:length(varsplot)){
+  data_mixed <- as.data.frame(grouped_list[[i]])
+    if(all(data_mixed$p.adj.signif=="ns")){
+        p<-ggplot(data=aovdata, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+            geom_boxplot(outlier.shape = NA) +
+            geom_jitter(aes(color= Gender), position = position_jitterdodge(jitter.width = 0.5),alpha = 0.9, size = 2) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116 = "#2A4B9A")) +
+            theme_minimal()+
+            coord_cartesian(ylim = c(0, NA))
+    }else{
+        p<-ggplot(data=aovdata, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+            geom_boxplot(outlier.shape = NA) +
+            geom_jitter(aes(color= Gender), position = position_jitterdodge(jitter.width = 0.5),alpha = 0.9, size = 2) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116 = "#2A4B9A")) +
+            theme_minimal()+
+            coord_cartesian(ylim = c(0, NA))+
+            stat_pvalue_manual( data = data_mixed, 
+                                mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_Mixed_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+}
+```
+```{r}
+    data_mixed <- as.data.frame(grouped_list[[1]])
+```
+# Correlation between number of falls and time to fall with weight
+
+```{r}
+# Create scatter plots with tendency lines
+
+
+scatter_plot <- data %>%
+  group_by(Gender, Group) %>%
+  mutate(R2 = summary(lm(Mean_time ~ Weight_in_g))$r.squared) %>%
+  ggplot(aes(x = Weight_in_g, y = Mean_time, color = Group)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +  # Add linear regression line
+  geom_text(
+    aes(label = paste("R^2 =", round(R2, 2))),
+    x = Inf, y = -Inf, hjust = 1, vjust = 0, show.legend = FALSE
+  ) +
+  facet_grid(Gender ~ .) +  # Separate plots for each sex
+  labs(x = "Weight (g)", y = "Mean Time", color = "Group") +
+  theme_minimal()+
+  ggtitle("Mean_time_by_weight and sex")
+
+# Display the scatter plot
+print(scatter_plot)
+  # Save the plot in vector format (PDF)
+  ggsave(filename = "Mean_time_by_weight and sex.pdf", plot = scatter_plot, device = "pdf", width = 8, height = 6, units = "in")
+```
+```{r}
+# Create scatter plots with tendency lines
+
+
+scatter_plot <- data %>%
+  group_by(Gender, Group) %>%
+  mutate(R2 = summary(lm(Mean_falls ~ Weight_in_g))$r.squared) %>%
+  ggplot(aes(x = Weight_in_g, y = Mean_falls, color = Group)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +  # Add linear regression line
+  geom_text(
+    aes(label = paste("R^2 =", round(R2, 2))),
+    x = Inf, y = -Inf, hjust = 1, vjust = 0, show.legend = FALSE
+  ) +
+  facet_grid(Gender ~ .) +  # Separate plots for each sex
+  labs(x = "Weight (g)", y = "Mean Falls", color = "Group") +
+  theme_minimal()+
+  ggtitle("Mean_falls_by_weight and sex")
+
+# Display the scatter plot
+print(scatter_plot)
+  # Save the plot in vector format (PDF)
+  ggsave(filename = "Mean_falls_by_weight and sex.pdf", plot = scatter_plot, device = "pdf", width = 8, height = 6, units = "in")
+```
+
+
+
+```{r}
+# Create scatter plots with tendency lines
+
+
+scatter_plot <- data %>%
+  group_by(Group) %>%
+  mutate(R2 = summary(lm(Mean_time ~ Weight_in_g))$r.squared) %>%
+  ggplot(aes(x = Weight_in_g, y = Mean_time, color = Group)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +  # Add linear regression line
+  geom_text(
+    aes(label = paste("R^2 =", round(R2, 2))),
+    x = Inf, y = -Inf, hjust = 1, vjust = 0, show.legend = FALSE
+  ) +
+  labs(x = "Weight (g)", y = "Mean Time", color = "Group") +
+  theme_minimal()+
+  ggtitle("Mean_time_by_weight")
+
+# Display the scatter plot
+print(scatter_plot)
+  # Save the plot in vector format (PDF)
+  ggsave(filename = "Mean_time_by_weight.pdf", plot = scatter_plot, device = "pdf", width = 8, height = 6, units = "in")
+```
+```{r}
+# Create scatter plots with tendency lines
+scatter_plot <- data %>%
+  group_by(Group) %>%
+  mutate(R2 = summary(lm(Mean_falls ~ Weight_in_g))$r.squared) %>%
+  ggplot(aes(x = Weight_in_g, y = Mean_falls, color = Group)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +  # Add linear regression line
+  geom_text(
+    aes(label = paste("R^2 =", round(R2, 2))),
+    x = Inf, y = -Inf, hjust = 1, vjust = 0, show.legend = FALSE
+  ) +
+  labs(x = "Weight (g)", y = "Mean Falls", color = "Group") +
+  theme_minimal()+
+  ggtitle("Mean_falls_by_weight")
+
+# Display the scatter plot
+print(scatter_plot)
+  # Save the plot in vector format (PDF)
+  ggsave(filename = "Mean_falls_by_weight.pdf", plot = scatter_plot, device = "pdf", width = 8, height = 6, units = "in")
+```
+
+
+# Dataframes to save
+
+```{r}
+#Group by Gender
+levene_results_gender
+shapiro_test_gender
+
+male_aov_results_df
+male_significant_vars
+female_aov_results_df
+female_significant_vars
+#Mixed ANOVA
+shapiro_test_group
+aov_results_df
+significant_vars
+#Males vs Females
+aov_results_df_sex
+significant_vars_sex
+
+```
+# Tables
+```{r}
+# Load required libraries
+library(kableExtra)
+dataframes <- c("levene_results_gender","shapiro_test_gender","male_aov_results_df","male_significant_vars","female_aov_results_df","female_significant_vars","shapiro_test_group","aov_results_df","significant_vars","aov_results_df_sex","significant_vars_sex")
+
+for (i in 1:length(dataframes)) {
+  df <- get(dataframes[i])
+  cols <- colnames(df)  # Get the column names of the dataframe
+  p <- knitr::kable(df, "html") %>% 
+    kable_paper("striped", full_width = F, font_size = 14) 
+  #%>%     add_header_above(header = list(cols))  # Use a list to specify the header row
+  print(dataframes[i])
+  print(p)
+}
+
+```
+# Export resulst as CSV
+```{r}
+
+# Carga la librería openxlsx
+library(openxlsx)
+
+# Crea un nuevo libro de Excel
+wb <- createWorkbook()
+
+# Agrega cada dataframe como una hoja en el libro
+for (df_name in dataframes) {
+  df <- get(df_name)  # Get the dataframe by its name
+  addWorksheet(wb, sheetName = df_name)
+  writeData(wb, sheet = df_name, x = df)
+}
+
+# Guarda el libro de Excel
+saveWorkbook(wb, file = "dataframes.xlsx", overwrite = TRUE)
+```
+
+
+
+
