@@ -1,0 +1,571 @@
+---
+title: "Survival"
+date: "2023-09-04"
+author: Santiago López Begines
+github: https://github.com/SLopezBegines/R_code
+output:
+  html_document:
+    highlight: kate
+    fig_width: 8
+    fig_height: 7
+    fig_caption: no
+    lightbox: yes
+    gallery: yes
+    use_bookdown: yes
+    code_folding: show
+    toc: yes
+    toc_depth: 5
+    toc_float: 
+      collapsed: no
+      smooth_scroll: yes
+    df_print: kable
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+#Libraries
+library(readxl)
+library(tidyverse)
+library(psych)
+library(DescTools)
+library(car)
+library(stats)
+library(broom)
+library(dunn.test)
+library(stats)
+library(ggpubr)
+library(RcmdrMisc)
+library(spatstat.utils)
+```
+
+
+# 1. Load data
+
+```{r}
+data<- read_excel("Survival_all.xlsx")
+```
+
+# 2. Cleaning data
+Clean the data. Data includes all values with all types of deaths. Age is calculated in months and days. 
+```{r}
+#Round age in months. 
+data$Age_m <- round(data$Age_m, 0)
+data$Group <- factor(data$Group, levels=c("NTC","WT","L115","L116"))
+
+#Remove animals with more than 30months and less than 1month.
+data <- data[data$Age_m>=1 & data$Age_m<=30,]
+```
+
+Statistical summary of data
+```{r}
+mean_sem_data <- data %>% 
+  filter(Type_of_dead == "Natural Death") %>% 
+  group_by(Gender, Group) %>% 
+  summarise(mean_m=mean(Age_m,na.rm = TRUE),
+            SD=sd(Age_m,na.rm = TRUE),
+            SEM=SD/sqrt(n()),
+            N=n(),
+            mean_d=mean(Age_d,na.rm = TRUE),
+            SD_d=sd(Age_d,na.rm = TRUE),
+            SEM_d=SD/sqrt(n()),
+            MinAge_m=min(Age_m),
+            MaxAge_m=max(Age_m),
+            MinAge_d=min(Age_d),
+            MaxAge_d=max(Age_d))
+mean_sem_data
+```
+
+
+# 3. Mixed Data
+Mixing males and females. Taking only account "Natural Deaths"
+```{r}
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death")
+
+p<- ggplot(mn, aes(x = Age_m, color = Group)) +
+  stat_ecdf(geom = "step", size=0.5) +
+  scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A")) +
+  labs(title = "Cumulative Distribution Comparison",
+       x = "Age in Months",
+       y = "Cumulative Probability") +
+  theme_minimal()+
+  theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))
+print(p)
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+# File path to save the plot
+  file_path <- paste0("plots/Survival_Mixed_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+
+```
+
+```{r}
+# Load the ks package if not already loaded
+library(ks)
+
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death")
+# Create an empty matrix to store the p-values
+p_values_matrix <- matrix(NA, nrow = 4, ncol = 4)
+
+# Get unique group names
+unique_groups <- unique(mn$Group)
+
+# Loop through all possible pairwise combinations of groups
+for (i in 1:(length(unique_groups) - 1)) {
+  for (j in (i + 1):length(unique_groups)) {
+    group_1 <- unique_groups[i]
+    group_2 <- unique_groups[j]
+    # Subset the data for the two groups being compared
+    #data_group1 <- MN_data[MN_data$Group == group1, "cum"]
+    #data_group2 <- MN_data[MN_data$Group == group2, "cum"]
+    data_group_1 <- mn %>% filter(Group==group_1) %>% pull(Age_m)
+    data_group_2 <- mn %>% filter(Group==group_2) %>% pull(Age_m)
+    # Perform the KS test
+    ks_result <- ks.test(data_group_1, data_group_2)
+    
+    # Store the p-value in the matrix
+    p_values_matrix[i, j] <- ks_result$p.value
+    p_values_matrix[j, i] <- ks_result$p.value
+  }
+}
+
+# Add row and column names to the p-values matrix
+rownames(p_values_matrix) <- unique_groups
+colnames(p_values_matrix) <- unique_groups
+p_val <- as.data.frame(p_values_matrix)
+# View the p-values matrix (optional)
+print(p_val)
+```
+
+Comparison between WT and L115R
+```{r}
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death"& Group %in% c("WT","L115"))
+
+p<- ggplot(mn, aes(x = Age_m, color = Group)) +
+  stat_ecdf(geom = "step", size=0.5) +
+  scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A")) +
+  labs(title = "Cumulative Distribution Comparison",
+       x = "Age in Months",
+       y = "Cumulative Probability") +
+  theme_minimal()+
+  theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))
+print(p)
+# File path to save the plot
+  file_path <- paste0("plots/Survival_Mixed_boxplot_WT_L115.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+```
+### Kaplan-Meier Plots
+All types of deaths are taken into account. Status variable is created. Status is set as 0 when age have been censored, and 1 when death occured before to end the experiment (Natural death are marked as 1). Censored are the samples that have been sacrified in any way before their natural death. 
+```{r}
+library(ggsurvfit)
+library(gtsummary)
+library(tidycmprsk)
+
+
+survival <- survival::Surv(data$Age_m, data$Status)
+s1<- survival::survfit(survival~Group, data)
+
+p<- survfit2(Surv(Age_m, Status) ~ Group, data ) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Months",
+    y = "Overall survival probability"
+  )+
+  theme_minimal()+
+  theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))+
+    scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A"))
+print(p)
+# File path to save the plot
+  file_path <- paste0("plots/Survival_KM_Mixed_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+```
+#### Long-Rank test
+p-value of Long-Rank test is p=0.5, so null hypothesis is not rejected. There are not differences between genotypes.
+
+```{r}
+long_rank_mixed <- survival::survdiff(Surv(Age_m, Status) ~ Group, data)
+long_rank_mixed
+```
+```{r}
+survival::coxph(Surv(Age_m,Status) ~ Gender, data) %>% 
+  tbl_regression(exp=TRUE)
+```
+
+
+# 4. Females
+Taking only account Females and "Natural Deaths"
+```{r}
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death" & Gender =="Female")
+
+p<- ggplot(mn, aes(x = Age_m, color = Group)) +
+  stat_ecdf(geom = "step", size=0.5) +
+  scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A")) +
+  labs(title = "Cumulative Distribution Comparison",
+       x = "Age in Months",
+       y = "Cumulative Probability") +
+  theme_minimal()+theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))
+print(p)
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+# File path to save the plot
+  file_path <- paste0("plots/Survival_Females_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+
+```
+
+```{r}
+# Load the ks package if not already loaded
+library(ks)
+
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death"& Gender =="Female")
+# Create an empty matrix to store the p-values
+p_values_matrix <- matrix(NA, nrow = 4, ncol = 4)
+
+# Get unique group names
+unique_groups <- unique(mn$Group)
+
+# Loop through all possible pairwise combinations of groups
+for (i in 1:(length(unique_groups) - 1)) {
+  for (j in (i + 1):length(unique_groups)) {
+    group_1 <- unique_groups[i]
+    group_2 <- unique_groups[j]
+    # Subset the data for the two groups being compared
+    #data_group1 <- MN_data[MN_data$Group == group1, "cum"]
+    #data_group2 <- MN_data[MN_data$Group == group2, "cum"]
+    data_group_1 <- mn %>% filter(Group==group_1) %>% pull(Age_m)
+    data_group_2 <- mn %>% filter(Group==group_2) %>% pull(Age_m)
+    # Perform the KS test
+    ks_result <- ks.test(data_group_1, data_group_2)
+    
+    # Store the p-value in the matrix
+    p_values_matrix[i, j] <- ks_result$p.value
+    p_values_matrix[j, i] <- ks_result$p.value
+  }
+}
+
+# Add row and column names to the p-values matrix
+rownames(p_values_matrix) <- unique_groups
+colnames(p_values_matrix) <- unique_groups
+p_val_female<- as.data.frame(p_values_matrix)
+# View the p-values matrix (optional)
+print(p_val_female)
+```
+
+### Kaplan-Meier Plots
+All types of deaths are taken into account. Status variable is created. Status is set as 0 when age have been censored, and 1 when death occured before to end the experiment (Natural death are marked as 1). Censored are the samples that have been sacrified in any way before their natural death. 
+```{r}
+library(ggsurvfit)
+library(gtsummary)
+library(tidycmprsk)
+
+km_data_female <- data %>% 
+  filter(Gender =="Female")
+
+survival <- survival::Surv(km_data_female$Age_m, km_data_female$Status)
+s1<- survival::survfit(survival~Group, km_data_female)
+
+p<- survfit2(Surv(Age_m, Status) ~ Group, km_data_female) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Months",
+    y = "Overall survival probability"
+  )+
+  theme_minimal()+
+  theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))+
+    scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A"))
+print(p)
+# File path to save the plot
+  file_path <- paste0("plots/Survival_KM_Females_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+```
+#### Long-Rank test
+p-value of Long-Rank test is p=0.1, so null hypothesis is not rejected. There are not differences between genotypes.
+
+
+```{r}
+survival::survdiff(Surv(Age_m, Status) ~ Group, km_data_female)
+```
+```{r}
+survival::coxph(Surv(Age_m,Status) ~ Group, km_data_female) %>% 
+  tbl_regression(exp=TRUE)
+```
+
+
+
+
+
+# 5. Males
+Taking only account Males and "Natural Deaths"
+
+```{r}
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death" & Gender =="Male")
+
+p<- ggplot(mn, aes(x = Age_m, color = Group)) +
+  stat_ecdf(geom = "step", size=0.5) +
+  scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A")) +
+  labs(title = "Cumulative Distribution Comparison",
+       x = "Age in Months",
+       y = "Cumulative Probability") +
+  theme_minimal()+
+  theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))
+print(p)
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+# File path to save the plot
+  file_path <- paste0("plots/Survival_Males_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+
+```
+
+
+```{r}
+# Load the ks package if not already loaded
+library(ks)
+
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death"& Gender =="Male")
+# Create an empty matrix to store the p-values
+p_values_matrix <- matrix(NA, nrow = 4, ncol = 4)
+
+# Get unique group names
+unique_groups <- unique(mn$Group)
+
+# Loop through all possible pairwise combinations of groups
+for (i in 1:(length(unique_groups) - 1)) {
+  for (j in (i + 1):length(unique_groups)) {
+    group_1 <- unique_groups[i]
+    group_2 <- unique_groups[j]
+    # Subset the data for the two groups being compared
+    #data_group1 <- MN_data[MN_data$Group == group1, "cum"]
+    #data_group2 <- MN_data[MN_data$Group == group2, "cum"]
+    data_group_1 <- mn %>% filter(Group==group_1) %>% pull(Age_m)
+    data_group_2 <- mn %>% filter(Group==group_2) %>% pull(Age_m)
+    # Perform the KS test
+    ks_result <- ks.test(data_group_1, data_group_2)
+    
+    # Store the p-value in the matrix
+    p_values_matrix[i, j] <- ks_result$p.value
+    p_values_matrix[j, i] <- ks_result$p.value
+  }
+}
+
+# Add row and column names to the p-values matrix
+rownames(p_values_matrix) <- unique_groups
+colnames(p_values_matrix) <- unique_groups
+p_val_male <- as.data.frame(p_values_matrix)
+# View the p-values matrix (optional)
+print(p_val_male)
+```
+
+```{r}
+mn<-data %>% 
+  filter(Type_of_dead=="Natural Death" & Gender =="Male" & Group %in% c("WT","L115","L116"))
+
+p<- ggplot(mn, aes(x = Age_m, color = Group)) +
+  stat_ecdf(geom = "step") +
+  scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A")) +
+  labs(title = "Cumulative Distribution Comparison",
+       x = "Age in Months",
+       y = "Cumulative Probability") +
+  theme_minimal()
+print(p)
+# Create a directory to save the plots (if it doesn't exist)
+if (!file.exists("plots")) {
+  dir.create("plots")
+}
+# File path to save the plot
+  file_path <- paste0("plots/Survival?_Males_boxplot_WT_L115.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+
+```
+
+
+### Kaplan-Meier Plots
+All types of deaths are taken into account. Status variable is created. Status is set as 0 when age have been censored, and 1 when death occured before to end the experiment (Natural death are marked as 1). Censored are the samples that have been sacrified in any way before their natural death. 
+```{r}
+library(ggsurvfit)
+library(gtsummary)
+library(tidycmprsk)
+
+km_data_male <- data %>% 
+  filter(Gender =="Male")
+
+survival <- survival::Surv(km_data_male$Age_m, km_data_male$Status)
+s1<- survival::survfit(survival~Group, km_data_male)
+
+p<- survfit2(Surv(Age_m, Status) ~ Group, km_data_male) %>% 
+  ggsurvfit() +
+  labs(
+    x = "Months",
+    y = "Overall survival probability"
+  )+
+  theme_minimal()+
+  theme(axis.line.x.bottom = element_line(color = "black", size = 0.5),
+                  axis.line.y.left = element_line(color = "black", size = 0.5))+
+    scale_color_manual(values = c(NTC = "#808080",
+                               WT = "#000000",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A"))
+print(p)
+# File path to save the plot
+  file_path <- paste0("plots/Survival_KM_Males_boxplot.pdf")
+  
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+```
+#### Long-Rank test
+p-value of Long-Rank test is less p=0.05, so null hypothesis is rejected. There are differences between genotypes.
+
+```{r}
+survival::survdiff(Surv(Age_m, Status) ~ Group, km_data_male)
+```
+To check where are the differences between groups, post-hoc test is used. Differences only arise when "none" correction method is applied for correction of adjusted p-values.So, the difference exist only between L115 and the rest of the group, but this difference is no highly different statistically.
+
+```{r}
+survminer::pairwise_survdiff(Surv(Age_m, Status)~Group, km_data_male, p.adjust.method="none")
+```
+
+```{r}
+survival::coxph(Surv(Age_m,Status) ~ Group, km_data_male) %>% 
+  tbl_regression(exp=TRUE)
+```
+# 6. Tables
+```{r}
+# Load required libraries
+library(kableExtra)
+dataframes <- c("data","p_val","p_val_female","p_val_male", "mean_sem_data")
+
+for (i in 1:length(dataframes)) {
+  df <- get(dataframes[i])
+  cols <- colnames(df)  # Get the column names of the dataframe
+  p <- knitr::kable(df, "html") %>% 
+    kableExtra::kable_paper("striped", full_width = F, font_size = 14)
+  print(p)
+}
+
+```
+
+
+# Export resulst as CSV
+```{r}
+
+# Carga la librería openxlsx
+library(openxlsx)
+
+# Crea un nuevo libro de Excel
+wb <- createWorkbook()
+
+# Agrega cada dataframe como una hoja en el libro
+for (df_name in dataframes) {
+  df <- get(df_name)  # Get the dataframe by its name
+  addWorksheet(wb, sheetName = df_name)
+  writeData(wb, sheet = df_name, x = df)
+}
+
+# Guarda el libro de Excel
+saveWorkbook(wb, file = "dataframes.xlsx", overwrite = TRUE)
+```
+# 7. Session Info
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+## Not included
+
+
+```{r eval = FALSE}
+MN_data <- data %>% 
+  filter(Type_of_dead=="MN") %>% 
+  group_by(Group, Age_m) %>% 
+  summarise(N = n())
+MN_data
+```
+
+
+```{r eval = FALSE}
+MN_data$prop <- MN_data %>% 
+  group_by(Group) %>% 
+  summarise(prop=N/sum(N),
+            cumprop=cumsum(prop))
+
+MN_data$cum <- MN_data$prop$cumprop
+MN_data$prop <- MN_data$prop$prop
+
+```
+
+```{r eval = FALSE}
+ggplot(MN_data) +
+  aes(x = Age_m, y = cum, fill = Group) +
+  geom_col(position="dodge") +
+  geom_line()+
+  scale_fill_hue(direction = 1) +
+    scale_fill_manual(values = c(NTC = "#808080",
+                               WT = "#D4D3D3",
+                               L115 = "#E42320",
+                               L116 = "#2A4B9A")) +
+  theme_minimal() 
+```
