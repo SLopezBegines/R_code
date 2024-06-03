@@ -1,0 +1,1892 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-04-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Libraries
+library(tidyverse)
+library(readxl)
+library(psych)
+library(DescTools)
+library(car)
+library(stats)
+library(broom)
+library(dunn.test)
+library(stats)
+library(ggpubr)
+library(rstatix)
+```
+
+# Lipofuscin quantification in Cerebellum
+
+```{r}
+#Load document
+dcn_data <- read_xlsx("Measurements_cerebellum.xlsx", sheet = "DCN",range = "A1:S7500")
+crest_data <- read_xlsx("Measurements_cerebellum.xlsx", sheet = "Crest",range = "A1:S7500" )
+str_data <- read_xlsx("Measurements_cerebellum.xlsx", sheet = "STR" ,range = "A1:S7500")
+sn_data <- read_xlsx("Measurements_cerebellum.xlsx", sheet = "SN" ,range = "A1:S7500")
+
+#Change tipe of column and reorder them
+dcn_data <- dcn_data %>% 
+  mutate(across(c("ROI", "Group","ID", "Ch", "Slice"), as.factor),
+         across(c("Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", 
+                  "FeretX", "FeretY", "FeretAngle", "MinFeret"), as.numeric))%>% 
+  dplyr::select("ROI","Label", "Group", "ID", "Ch", "Slice", "Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", "FeretX", "FeretY", "FeretAngle", "MinFeret") 
+
+crest_data <- crest_data %>% 
+  mutate(across(c("ROI", "Group","ID", "Ch", "Slice"), as.factor),
+         across(c("Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", 
+                  "FeretX", "FeretY", "FeretAngle", "MinFeret"), as.numeric))%>% 
+  dplyr::select("ROI","Label", "Group", "ID", "Ch", "Slice", "Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", "FeretX", "FeretY", "FeretAngle", "MinFeret") 
+
+sn_data <- sn_data %>% 
+  mutate(across(c("ROI", "Group","ID", "Ch", "Slice"), as.factor),
+         across(c("Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", 
+                  "FeretX", "FeretY", "FeretAngle", "MinFeret"), as.numeric))%>% 
+  dplyr::select("ROI","Label", "Group", "ID", "Ch", "Slice", "Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", "FeretX", "FeretY", "FeretAngle", "MinFeret") 
+
+str_data <- str_data %>% 
+  mutate(across(c("ROI", "Group","ID", "Ch", "Slice"), as.factor),
+         across(c("Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", 
+                  "FeretX", "FeretY", "FeretAngle", "MinFeret"), as.numeric))%>% 
+  dplyr::select("ROI","Label", "Group", "ID", "Ch", "Slice", "Area", "Mean", "StdDev", "Min", "Max", "Perim.", "Feret", "IntDen", "RawIntDen", "FeretX", "FeretY", "FeretAngle", "MinFeret") 
+
+
+#Remove NA values
+dcn_data <- dcn_data %>%
+  filter(rowSums(is.na(.)) != ncol(.))
+crest_data <- crest_data %>%
+  filter(rowSums(is.na(.)) != ncol(.))
+sn_data <- sn_data %>%
+  filter(rowSums(is.na(.)) != ncol(.))
+str_data <- str_data %>%
+  filter(rowSums(is.na(.)) != ncol(.))
+
+
+#Group levels
+dcn_data$Group <-  factor(dcn_data$Group, levels = c("NTC","WT","L115R","L116del"))
+crest_data$Group <-  factor(crest_data$Group, levels = c("NTC","WT","L115R","L116del"))
+sn_data$Group <-  factor(sn_data$Group, levels = c("NTC","WT","L115R","L116del"))
+str_data$Group <-  factor(str_data$Group, levels = c("WT","L115R","L116del"))
+#ID Levels
+dcn_data$ID <-  factor(dcn_data$ID, levels = c("128","153","159","152","156","176","160","161","165","145","147","157"))
+crest_data$ID <-  factor(crest_data$ID, levels = c("128","153","159","152","156","176","160","161","165","145","147","157"))
+sn_data$ID <-  factor(sn_data$ID, levels = c("128","153","159","152","156","176","160","161","165","145","147","157"))
+str_data$ID <-  factor(str_data$ID, levels = c("152","156","176","160","161","165","145","147","157"))
+
+```
+
+# DCN
+##Means
+### Mean data by group
+
+```{r}
+dcn_mean_data <-dcn_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(N=n())
+
+# Iterate through each numerical variable
+for (col in names(dcn_data)[7:ncol(dcn_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  dcn_means <- dcn_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(dcn_mean_data) == 0) {
+    dcn_mean_data <- dcn_means
+  } else {
+    dcn_mean_data <- left_join(dcn_mean_data, dcn_means, by = c("Group"))
+  }
+}
+dcn_mean_data
+```
+
+### Mean data by ID
+```{r}
+dcn_mean_data_ID <-dcn_data %>%
+  dplyr::filter(Ch == 4) %>% 
+  dplyr::group_by(ID) %>% 
+    summarise(N=n())
+
+# Iterate through each numerical variable. Group by ID
+for (col in names(dcn_data)[7:ncol(dcn_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  dcn_means_ID <- dcn_data %>%
+    #dplyr::filter(Ch == 4) %>% 
+    group_by(ID) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(dcn_mean_data_ID) == 0) {
+    dcn_mean_data_ID <- dcn_means_ID
+  } else {
+    dcn_mean_data_ID <- left_join(dcn_mean_data_ID, dcn_means_ID, by = c("ID"))
+  }
+}  
+
+
+dcn_mean_data_ID <- dcn_mean_data_ID %>%
+  mutate(Group = case_when(
+    ID %in% c(128, 153, 159) ~ "NTC",
+    ID %in% c(152, 156, 176) ~ "WT",
+    ID %in% c(160, 161, 165) ~ "L115R",
+    ID %in% c(145, 147, 157) ~ "L116del",
+    TRUE ~ NA_character_  # Valor por defecto si no coincide con ninguna condición
+  ))%>%
+  select(ID, Group, starts_with("Mean"))  # Reorganizar las columnas
+
+# Convert the "Variable" column to a factor with the desired order
+dcn_mean_data_ID$Group <- factor(dcn_mean_data_ID$Group, levels = c("NTC","WT","L115R","L116del"))
+
+dcn_mean_data_ID <- dcn_mean_data_ID %>% 
+  arrange(Group)
+dcn_mean_data_ID
+```
+
+### Mean data by ID and Group
+```{r}
+dcn_mean_data_ID_group <-dcn_mean_data_ID %>%
+    dplyr::group_by(Group) %>% 
+    summarise(N=n())
+
+
+# Iterate through each numerical variable. Group by ID and group
+for (col in names(dcn_mean_data_ID)[3:ncol(dcn_mean_data_ID)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  dcn_means_ID_group <- dcn_mean_data_ID %>%
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(dcn_mean_data_ID) == 0) {
+    dcn_mean_data_ID_group <- dcn_means_ID_group
+  } else {
+    dcn_mean_data_ID_group <- left_join(dcn_mean_data_ID_group, dcn_means_ID_group, by = c("Group"))
+  }
+}
+
+dcn_mean_data_ID_group
+
+```
+
+## ANOVA
+### By Group
+```{r}
+dcn_aovlist <- list()
+dcn_data_aov <- dcn_data %>% 
+    dplyr::filter(Ch == 4) 
+
+for (col in names(dcn_data_aov)[7:ncol(dcn_data_aov)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = dcn_data_aov)
+    data_input <- data.frame("Group"=dcn_data_aov$Group, dcn_data_aov[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  dcn_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+dcn_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(dcn_aovlist)) {
+  test_result <- dcn_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  dcn_aov_results_df <- rbind(dcn_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#dcn_aov_results_df$StarScale <- sapply(dcn_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+dcn_aov_results_df$Gender <- "dcn"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(dcn_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+dcn_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+dcn_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(dcn_aov_results_df) <- gsub("Comparison\\.", "", colnames(dcn_aov_results_df))
+
+dcn_aov_results_df<- dcn_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(dcn_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+dcn_significant_vars <- subset(dcn_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(dcn_significant_vars))
+rownames(dcn_significant_vars) <- new_row_names
+
+print(dcn_significant_vars)
+
+```
+
+### By ID and Group
+
+```{r}
+dcn_ID_aovlist <- list()
+
+
+
+for (col in names(dcn_mean_data_ID)[3:ncol(dcn_mean_data_ID)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = dcn_mean_data_ID)
+    data_input <- data.frame("Group"=dcn_mean_data_ID$Group, dcn_mean_data_ID[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  dcn_ID_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+dcn_ID_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(dcn_ID_aovlist)) {
+  test_result <- dcn_ID_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  dcn_ID_aov_results_df <- rbind(dcn_ID_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#dcn_aov_results_df$StarScale <- sapply(dcn_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+dcn_ID_aov_results_df$Gender <- "dcn"
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(dcn_ID_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+dcn_ID_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+dcn_ID_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(dcn_ID_aov_results_df) <- gsub("Comparison\\.", "", colnames(dcn_ID_aov_results_df))
+
+#dcn_ID_aov_results_df<- dcn_ID_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(dcn_ID_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+dcn_ID_significant_vars <- subset(dcn_ID_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(dcn_ID_significant_vars))
+rownames(dcn_ID_significant_vars) <- new_row_names
+
+dcn_ID_significant_vars
+
+```
+
+
+## Plot
+### By Group
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot <- colnames(select_if(dcn_data,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(dcn_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+dcn_aov_results_df$Variable <- factor(dcn_aov_results_df$Variable, levels = desired_order)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list <- dcn_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+
+# Boxplot
+for (i in 1:length(varsplot)){
+  data_mixed <- as.data.frame(grouped_list[[i]])
+    if(all(data_mixed$p.adj.signif=="ns")){
+        p<-ggplot(data=dcn_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))+
+         coord_cartesian(ylim = c(0, NA))
+    }else{
+        p<-ggplot(data=dcn_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+          coord_cartesian(ylim = c(0, NA))+
+          stat_pvalue_manual( data = data_mixed, 
+                                mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_DCN_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_DCN_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 8, height = 6, units = "in")
+}
+```
+
+### By Group and ID
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot_ID <- colnames(select_if(dcn_mean_data_ID,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order_ID <- unique(dcn_ID_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+dcn_ID_aov_results_df$Variable <- factor(dcn_ID_aov_results_df$Variable, levels = desired_order_ID)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list_ID <- dcn_ID_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+```
+
+```{r}
+# Boxplot
+for (i in 1:length(varsplot_ID)){
+  data_mixed_ID <- as.data.frame(grouped_list_ID[[i]])
+    if(all(data_mixed_ID$p.adj.signif=="ns")){
+        p<-ggplot(data=dcn_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot_ID[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))
+    }else{
+        p<-ggplot(data=dcn_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot_ID[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+       
+          stat_pvalue_manual( data = data_mixed_ID, 
+                              mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot_ID[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_DCN_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 4, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_DCN_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 4, height = 6, units = "in")
+}
+```
+
+
+
+
+# Crest
+##Means
+### Mean data by group
+
+```{r}
+crest_mean_data <-crest_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(N=n())
+
+# Iterate through each numerical variable
+for (col in names(crest_data)[7:ncol(crest_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  crest_means <- crest_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(crest_mean_data) == 0) {
+    crest_mean_data <- crest_means
+  } else {
+    crest_mean_data <- left_join(crest_mean_data, crest_means, by = c("Group"))
+  }
+}
+crest_mean_data
+```
+
+### Mean data by ID
+```{r}
+crest_mean_data_ID <-crest_data %>%
+  dplyr::filter(Ch == 4) %>% 
+  dplyr::group_by(ID) %>% 
+    summarise(N=n())
+
+# Iterate through each numerical variable. Group by ID
+for (col in names(crest_data)[7:ncol(crest_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  crest_means_ID <- crest_data %>%
+    #dplyr::filter(Ch == 4) %>% 
+    group_by(ID) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(crest_mean_data_ID) == 0) {
+    crest_mean_data_ID <- crest_means_ID
+  } else {
+    crest_mean_data_ID <- left_join(crest_mean_data_ID, crest_means_ID, by = c("ID"))
+  }
+}  
+
+
+crest_mean_data_ID <- crest_mean_data_ID %>%
+  mutate(Group = case_when(
+    ID %in% c(128, 153, 159) ~ "NTC",
+    ID %in% c(152, 156, 176) ~ "WT",
+    ID %in% c(160, 161, 165) ~ "L115R",
+    ID %in% c(145, 147, 157) ~ "L116del",
+    TRUE ~ NA_character_  # Valor por defecto si no coincide con ninguna condición
+  ))%>%
+  select(ID, Group, starts_with("Mean"))  # Reorganizar las columnas
+
+# Convert the "Variable" column to a factor with the desired order
+crest_mean_data_ID$Group <- factor(crest_mean_data_ID$Group, levels = c("NTC","WT","L115R","L116del"))
+
+crest_mean_data_ID <- crest_mean_data_ID %>% 
+  arrange(Group)
+crest_mean_data_ID
+```
+
+### Mean data by ID and Group
+```{r}
+crest_mean_data_ID_group <-crest_mean_data_ID %>%
+    dplyr::group_by(Group) %>% 
+    summarise(N=n())
+
+
+# Iterate through each numerical variable. Group by ID and group
+for (col in names(crest_mean_data_ID)[3:ncol(crest_mean_data_ID)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  crest_means_ID_group <- crest_mean_data_ID %>%
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(crest_mean_data_ID) == 0) {
+    crest_mean_data_ID_group <- crest_means_ID_group
+  } else {
+    crest_mean_data_ID_group <- left_join(crest_mean_data_ID_group, crest_means_ID_group, by = c("Group"))
+  }
+}
+
+crest_mean_data_ID_group
+
+```
+
+## ANOVA
+### By Group
+```{r}
+crest_aovlist <- list()
+crest_data_aov <- crest_data %>% 
+    dplyr::filter(Ch == 4) 
+
+for (col in names(crest_data_aov)[7:ncol(crest_data_aov)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = crest_data_aov)
+    data_input <- data.frame("Group"=crest_data_aov$Group, crest_data_aov[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  crest_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+crest_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(crest_aovlist)) {
+  test_result <- crest_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  crest_aov_results_df <- rbind(crest_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#crest_aov_results_df$StarScale <- sapply(crest_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+crest_aov_results_df$Gender <- "crest"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(crest_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+crest_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+crest_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(crest_aov_results_df) <- gsub("Comparison\\.", "", colnames(crest_aov_results_df))
+
+crest_aov_results_df<- crest_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(crest_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+crest_significant_vars <- subset(crest_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(crest_significant_vars))
+rownames(crest_significant_vars) <- new_row_names
+
+print(crest_significant_vars)
+
+```
+
+### By ID and Group
+
+```{r}
+crest_ID_aovlist <- list()
+
+
+
+for (col in names(crest_mean_data_ID)[3:ncol(crest_mean_data_ID)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = crest_mean_data_ID)
+    data_input <- data.frame("Group"=crest_mean_data_ID$Group, crest_mean_data_ID[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  crest_ID_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+crest_ID_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(crest_ID_aovlist)) {
+  test_result <- crest_ID_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  crest_ID_aov_results_df <- rbind(crest_ID_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#crest_aov_results_df$StarScale <- sapply(crest_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+crest_ID_aov_results_df$Gender <- "crest"
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(crest_ID_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+crest_ID_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+crest_ID_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(crest_ID_aov_results_df) <- gsub("Comparison\\.", "", colnames(crest_ID_aov_results_df))
+
+#crest_ID_aov_results_df<- crest_ID_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(crest_ID_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+crest_ID_significant_vars <- subset(crest_ID_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(crest_ID_significant_vars))
+rownames(crest_ID_significant_vars) <- new_row_names
+
+print(crest_ID_significant_vars)
+
+```
+
+
+## Plot
+### By Group
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot <- colnames(select_if(crest_data,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(crest_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+crest_aov_results_df$Variable <- factor(crest_aov_results_df$Variable, levels = desired_order)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list <- crest_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+
+# Boxplot
+for (i in 1:length(varsplot)){
+  data_mixed <- as.data.frame(grouped_list[[i]])
+    if(all(data_mixed$p.adj.signif=="ns")){
+        p<-ggplot(data=crest_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))+
+         coord_cartesian(ylim = c(0, NA))
+    }else{
+        p<-ggplot(data=crest_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+          coord_cartesian(ylim = c(0, NA))+
+          stat_pvalue_manual( data = data_mixed, 
+                                mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_crest_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_crest_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 8, height = 6, units = "in")
+}
+```
+
+### By Group and ID
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot_ID <- colnames(select_if(crest_mean_data_ID,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order_ID <- unique(crest_ID_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+crest_ID_aov_results_df$Variable <- factor(crest_ID_aov_results_df$Variable, levels = desired_order_ID)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list_ID <- crest_ID_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+```
+
+```{r}
+# Boxplot
+for (i in 1:length(varsplot_ID)){
+  data_mixed_ID <- as.data.frame(grouped_list_ID[[i]])
+    if(all(data_mixed_ID$p.adj.signif=="ns")){
+        p<-ggplot(data=crest_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot_ID[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))
+    }else{
+        p<-ggplot(data=crest_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot_ID[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+
+          stat_pvalue_manual( data = data_mixed_ID, 
+                              mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot_ID[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_crest_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 4, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_crest_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 4, height = 6, units = "in")
+}
+```
+# STR
+##Means
+### Mean data by group
+
+```{r}
+str_mean_data <-str_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(N=n())
+
+# Iterate through each numerical variable
+for (col in names(str_data)[7:ncol(str_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  str_means <- str_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(str_mean_data) == 0) {
+    str_mean_data <- str_means
+  } else {
+    str_mean_data <- left_join(str_mean_data, str_means, by = c("Group"))
+  }
+}
+str_mean_data
+```
+
+### Mean data by ID
+```{r}
+str_mean_data_ID <-str_data %>%
+  dplyr::filter(Ch == 4) %>% 
+  dplyr::group_by(ID) %>% 
+    summarise(N=n())
+
+# Iterate through each numerical variable. Group by ID
+for (col in names(str_data)[7:ncol(str_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  str_means_ID <- str_data %>%
+    #dplyr::filter(Ch == 4) %>% 
+    group_by(ID) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(str_mean_data_ID) == 0) {
+    str_mean_data_ID <- str_means_ID
+  } else {
+    str_mean_data_ID <- left_join(str_mean_data_ID, str_means_ID, by = c("ID"))
+  }
+}  
+
+
+str_mean_data_ID <- str_mean_data_ID %>%
+  mutate(Group = case_when(
+    ID %in% c(128, 153, 159) ~ "NTC",
+    ID %in% c(152, 156, 176) ~ "WT",
+    ID %in% c(160, 161, 165) ~ "L115R",
+    ID %in% c(145, 147, 157) ~ "L116del",
+    TRUE ~ NA_character_  # Valor por defecto si no coincide con ninguna condición
+  ))%>%
+  select(ID, Group, starts_with("Mean"))  # Reorganizar las columnas
+
+# Convert the "Variable" column to a factor with the desired order
+str_mean_data_ID$Group <- factor(str_mean_data_ID$Group, levels = c("NTC","WT","L115R","L116del"))
+
+str_mean_data_ID <- str_mean_data_ID %>% 
+  arrange(Group)
+str_mean_data_ID
+```
+
+### Mean data by ID and Group
+```{r}
+str_mean_data_ID_group <-str_mean_data_ID %>%
+    dplyr::group_by(Group) %>% 
+    summarise(N=n())
+
+
+# Iterate through each numerical variable. Group by ID and group
+for (col in names(str_mean_data_ID)[3:ncol(str_mean_data_ID)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  str_means_ID_group <- str_mean_data_ID %>%
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(str_mean_data_ID) == 0) {
+    str_mean_data_ID_group <- str_means_ID_group
+  } else {
+    str_mean_data_ID_group <- left_join(str_mean_data_ID_group, str_means_ID_group, by = c("Group"))
+  }
+}
+
+str_mean_data_ID_group
+
+```
+
+## ANOVA
+### By Group
+```{r}
+str_aovlist <- list()
+str_data_aov <- str_data %>% 
+    dplyr::filter(Ch == 4) 
+
+for (col in names(str_data_aov)[7:ncol(str_data_aov)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = str_data_aov)
+    data_input <- data.frame("Group"=str_data_aov$Group, str_data_aov[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  str_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+str_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(str_aovlist)) {
+  test_result <- str_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  str_aov_results_df <- rbind(str_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#str_aov_results_df$StarScale <- sapply(str_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+str_aov_results_df$Gender <- "str"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(str_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+str_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+str_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(str_aov_results_df) <- gsub("Comparison\\.", "", colnames(str_aov_results_df))
+
+str_aov_results_df<- str_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(str_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+str_significant_vars <- subset(str_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(str_significant_vars))
+rownames(str_significant_vars) <- new_row_names
+
+print(str_significant_vars)
+
+```
+
+### By ID and Group
+
+```{r}
+str_ID_aovlist <- list()
+
+
+
+for (col in names(str_mean_data_ID)[3:ncol(str_mean_data_ID)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = str_mean_data_ID)
+    data_input <- data.frame("Group"=str_mean_data_ID$Group, str_mean_data_ID[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  str_ID_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+str_ID_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(str_ID_aovlist)) {
+  test_result <- str_ID_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  str_ID_aov_results_df <- rbind(str_ID_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#str_aov_results_df$StarScale <- sapply(str_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+str_ID_aov_results_df$Gender <- "str"
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(str_ID_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+str_ID_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+str_ID_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(str_ID_aov_results_df) <- gsub("Comparison\\.", "", colnames(str_ID_aov_results_df))
+
+#str_ID_aov_results_df<- str_ID_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(str_ID_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+str_ID_significant_vars <- subset(str_ID_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(str_ID_significant_vars))
+rownames(str_ID_significant_vars) <- new_row_names
+
+print(str_ID_significant_vars)
+
+```
+
+
+## Plot
+### By Group
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot <- colnames(select_if(str_data,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(str_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+str_aov_results_df$Variable <- factor(str_aov_results_df$Variable, levels = desired_order)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list <- str_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+
+# Boxplot
+for (i in 1:length(varsplot)){
+  data_mixed <- as.data.frame(grouped_list[[i]])
+    if(all(data_mixed$p.adj.signif=="ns")){
+        p<-ggplot(data=str_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))+
+         coord_cartesian(ylim = c(0, NA))
+    }else{
+        p<-ggplot(data=str_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+          coord_cartesian(ylim = c(0, NA))+
+          stat_pvalue_manual( data = data_mixed, 
+                                mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_str_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_str_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 8, height = 6, units = "in")
+}
+```
+
+### By Group and ID
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot_ID <- colnames(select_if(str_mean_data_ID,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order_ID <- unique(str_ID_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+str_ID_aov_results_df$Variable <- factor(str_ID_aov_results_df$Variable, levels = desired_order_ID)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list_ID <- str_ID_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+```
+
+```{r}
+# Boxplot
+for (i in 1:length(varsplot_ID)){
+  data_mixed_ID <- as.data.frame(grouped_list_ID[[i]])
+    if(all(data_mixed_ID$p.adj.signif=="ns")){
+        p<-ggplot(data=str_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot_ID[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))
+    }else{
+        p<-ggplot(data=str_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot_ID[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+        
+          stat_pvalue_manual( data = data_mixed_ID, 
+                              mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot_ID[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_str_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 4, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_str_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 4, height = 6, units = "in")
+}
+```
+# SN
+##Means
+### Mean data by group
+
+```{r}
+sn_mean_data <-sn_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(N=n())
+
+# Iterate through each numerical variable
+for (col in names(sn_data)[7:ncol(sn_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  sn_means <- sn_data %>%
+    dplyr::filter(Ch == 4) %>% 
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(sn_mean_data) == 0) {
+    sn_mean_data <- sn_means
+  } else {
+    sn_mean_data <- left_join(sn_mean_data, sn_means, by = c("Group"))
+  }
+}
+sn_mean_data
+```
+
+### Mean data by ID
+```{r}
+sn_mean_data_ID <-sn_data %>%
+  dplyr::filter(Ch == 4) %>% 
+  dplyr::group_by(ID) %>% 
+    summarise(N=n())
+
+# Iterate through each numerical variable. Group by ID
+for (col in names(sn_data)[7:ncol(sn_data)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  sn_means_ID <- sn_data %>%
+    #dplyr::filter(Ch == 4) %>% 
+    group_by(ID) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(sn_mean_data_ID) == 0) {
+    sn_mean_data_ID <- sn_means_ID
+  } else {
+    sn_mean_data_ID <- left_join(sn_mean_data_ID, sn_means_ID, by = c("ID"))
+  }
+}  
+
+
+sn_mean_data_ID <- sn_mean_data_ID %>%
+  mutate(Group = case_when(
+    ID %in% c(128, 153, 159) ~ "NTC",
+    ID %in% c(152, 156, 176) ~ "WT",
+    ID %in% c(160, 161, 165) ~ "L115R",
+    ID %in% c(145, 147, 157) ~ "L116del",
+    TRUE ~ NA_character_  # Valor por defecto si no coincide con ninguna condición
+  ))%>%
+  select(ID, Group, starts_with("Mean"))  # Reorganizar las columnas
+
+# Convert the "Variable" column to a factor with the desired order
+sn_mean_data_ID$Group <- factor(sn_mean_data_ID$Group, levels = c("NTC","WT","L115R","L116del"))
+
+sn_mean_data_ID <- sn_mean_data_ID %>% 
+  arrange(Group)
+sn_mean_data_ID
+```
+
+### Mean data by ID and Group
+```{r}
+sn_mean_data_ID_group <-sn_mean_data_ID %>%
+    dplyr::group_by(Group) %>% 
+    summarise(N=n())
+
+
+# Iterate through each numerical variable. Group by ID and group
+for (col in names(sn_mean_data_ID)[3:ncol(sn_mean_data_ID)]) {
+  # Group the data by Gender and Group, and calculate the mean for the current variable
+  sn_means_ID_group <- sn_mean_data_ID %>%
+    group_by(Group) %>%
+    summarise(!!paste0("Mean_", col) := round(mean(.data[[col]], na.rm = TRUE),3), .groups = "drop",
+              !!paste0("SEM_", col) := round(sd(.data[[col]], na.rm = TRUE)/sqrt(n()),3))
+  
+  # Join the result to the results data frame
+  if (nrow(sn_mean_data_ID) == 0) {
+    sn_mean_data_ID_group <- sn_means_ID_group
+  } else {
+    sn_mean_data_ID_group <- left_join(sn_mean_data_ID_group, sn_means_ID_group, by = c("Group"))
+  }
+}
+
+sn_mean_data_ID_group
+
+```
+
+## ANOVA
+### By Group
+```{r}
+sn_aovlist <- list()
+sn_data_aov <- sn_data %>% 
+    dplyr::filter(Ch == 4) 
+
+for (col in names(sn_data_aov)[7:ncol(sn_data_aov)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = sn_data_aov)
+    data_input <- data.frame("Group"=sn_data_aov$Group, sn_data_aov[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  sn_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+sn_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(sn_aovlist)) {
+  test_result <- sn_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  sn_aov_results_df <- rbind(sn_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#sn_aov_results_df$StarScale <- sapply(sn_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+sn_aov_results_df$Gender <- "sn"
+
+
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(sn_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+sn_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+sn_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(sn_aov_results_df) <- gsub("Comparison\\.", "", colnames(sn_aov_results_df))
+
+sn_aov_results_df<- sn_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(sn_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+sn_significant_vars <- subset(sn_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(sn_significant_vars))
+rownames(sn_significant_vars) <- new_row_names
+
+print(sn_significant_vars)
+
+```
+
+### By ID and Group
+
+```{r}
+sn_ID_aovlist <- list()
+
+
+
+for (col in names(sn_mean_data_ID)[3:ncol(sn_mean_data_ID)]) {
+    variable <- col
+    formula <- as.formula(paste0(col," ~ Group"))
+    res.aov <- aov(formula, data = sn_mean_data_ID)
+    data_input <- data.frame("Group"=sn_mean_data_ID$Group, sn_mean_data_ID[[col]])
+    names(data_input)[2]<- variable
+    data_input$Group <- as.factor(data_input$Group)
+    posthoc <- data_input %>% rstatix::tukey_hsd(formula) # Tukey's post-hoc test for ANOVA
+    posthoc<- posthoc %>% add_x_position(dodge = 0.8)
+    posthoc <- posthoc %>% add_y_position()
+    #posthoc<- posthoc %>% add_xy_position(scales = "fixed")
+    test_type <- "ANOVA"
+    Group1 <- posthoc$group1
+    Group2 <- posthoc$group2
+    posthoc$xmin<- posthoc$xmin
+    posthoc$xmax<- posthoc$xmax
+  
+  sn_ID_aovlist[[col]] <- list(aov_results = broom::tidy(res.aov, conf.int = TRUE), posthoc_results = posthoc, Test_Type = test_type, Variable = variable)
+}
+```
+
+
+```{r}
+# Create empty data frame to store the results
+sn_ID_aov_results_df <- data.frame()
+
+# Loop through the list of test results
+for (i in seq_along(sn_ID_aovlist)) {
+  test_result <- sn_ID_aovlist[[i]]
+   # Extract variable name
+  variable <- test_result$Variable
+  # Extract test type
+  test_type <- test_result$Test_Type
+  # Extract comparison and p-values
+  if (grepl("ANOVA", test_type, ignore.case = TRUE)) {
+    comparisons <- data.frame("Comparison"=paste0(test_result$posthoc_results$group1,"-",test_result$posthoc_results$group2),
+                              "p_value_adj"=test_result$posthoc_results$p.adj,
+                              "p.adj.signif"=test_result$posthoc_results$p.adj.signif,
+                              "y.position"=test_result$posthoc_results$y.position,
+                              "xmin"= test_result$posthoc_results$xmin,
+                              "xmax"= test_result$posthoc_results$xmax)
+    p_values <- test_result$aov_results$p.value[1]
+    } 
+  # Combine the results into a data frame
+  sn_ID_aov_results_df <- rbind(sn_ID_aov_results_df, data.frame(
+    Variable = variable,
+    Test_Type = test_type,
+    Comparison = comparisons,
+    P_Value = p_values
+  ))
+}
+#Add StarScale
+#sn_aov_results_df$StarScale <- sapply(sn_aov_results_df$Comparison.p_value_adj, convert_to_star)
+#Add gender column
+sn_ID_aov_results_df$Gender <- "sn"
+# Usamos strsplit para dividir la columna por el carácter "-" o " - "
+split_data <- strsplit(sn_ID_aov_results_df$Comparison.Comparison, split = "-")
+
+# Extraemos los elementos de la lista resultante y los asignamos a las nuevas columnas
+sn_ID_aov_results_df$group1 <- sapply(split_data, function(x) x[[1]])
+sn_ID_aov_results_df$group2 <- sapply(split_data, function(x) x[[2]])
+#change names of columns
+colnames(sn_ID_aov_results_df) <- gsub("Comparison\\.", "", colnames(sn_ID_aov_results_df))
+
+#sn_ID_aov_results_df<- sn_ID_aov_results_df %>% mutate_if(is.character, as.factor)
+# Print the dataframe
+print(sn_ID_aov_results_df)
+
+# Filter variables with significant differences between groups based on the ANOVA results (alpha level = 0.05)
+sn_ID_significant_vars <- subset(sn_ID_aov_results_df, p_value_adj < 0.05)
+new_row_names <- gsub("\\.1$", "", rownames(sn_ID_significant_vars))
+rownames(sn_ID_significant_vars) <- new_row_names
+
+print(sn_ID_significant_vars)
+
+```
+
+
+## Plot
+### By Group
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot <- colnames(select_if(sn_data,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order <- unique(sn_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+sn_aov_results_df$Variable <- factor(sn_aov_results_df$Variable, levels = desired_order)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list <- sn_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+
+# Boxplot
+for (i in 1:length(varsplot)){
+  data_mixed <- as.data.frame(grouped_list[[i]])
+    if(all(data_mixed$p.adj.signif=="ns")){
+        p<-ggplot(data=sn_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))+
+         coord_cartesian(ylim = c(0, NA))
+    }else{
+        p<-ggplot(data=sn_data, aes(x = Group, 
+                            y = .data[[varsplot[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 0.2, size = 1) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+          coord_cartesian(ylim = c(0, NA))+
+          stat_pvalue_manual( data = data_mixed, 
+                                mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_sn_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 8, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_sn_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 8, height = 6, units = "in")
+}
+```
+
+### By Group and ID
+```{r}
+# Combine male_varsnames and female_varsnames into varsplot
+varsplot_ID <- colnames(select_if(sn_mean_data_ID,is.numeric))
+
+# Assuming 'aov_results_df' is the data frame you have
+desired_order_ID <- unique(sn_ID_aov_results_df$Variable)
+
+# Convert the "Variable" column to a factor with the desired order
+sn_ID_aov_results_df$Variable <- factor(sn_ID_aov_results_df$Variable, levels = desired_order_ID)
+
+# Group the data frame by "Variable" and store the groups in a list
+grouped_list_ID <- sn_ID_aov_results_df %>%  group_split(Variable)
+
+# Function to clean up variable names for file paths
+clean_variable_name <- function(var_name) {
+  cleaned_name <- gsub("[[:punct:]]", "_", var_name)
+  return(cleaned_name)
+}
+```
+
+```{r}
+# Boxplot
+for (i in 1:length(varsplot_ID)){
+  data_mixed_ID <- as.data.frame(grouped_list_ID[[i]])
+    if(all(data_mixed_ID$p.adj.signif=="ns")){
+        p<-ggplot(data=sn_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+            geom_boxplot(width = 0.5,outlier.shape = NA) +
+            stat_boxplot(geom = "errorbar", width=0.15) +
+            geom_jitter(aes(stroke=0),position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+            labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+            ggtitle(paste0("Boxplot of ", varsplot_ID[i])) +
+            scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                  axis.text = element_text(size=12))
+    }else{
+        p<-ggplot(data=sn_mean_data_ID, aes(x = Group, 
+                            y = .data[[varsplot_ID[i]]],
+                            fill = Group)) +
+          geom_boxplot(width = 0.5,outlier.shape = NA) +
+          stat_boxplot(geom = "errorbar", width=0.15) +
+          geom_jitter(aes(stroke=0), position = position_jitterdodge(jitter.width = 2),alpha = 1, size = 3) +  # Separate jittered points by "Gender"
+          labs(x = "Group", 
+                 y = varsplot_ID[i]) +
+          ggtitle(paste0("Violin_plot of ", varsplot_ID[i])) +
+          scale_fill_manual(values = c(NTC = "#808080",
+                                         WT = "#D4D3D3",
+                                         L115R = "#E42320",
+                                         L116del = "#2A4B9A"), labels=c("NTC","WT","L115R","L116Δ")) +
+          scale_x_discrete(labels=c("NTC","WT","L115R","L116Δ"))+          
+          theme_classic()+
+          theme(axis.line.x.bottom = element_line(color = "black", linewidth = 0.5),
+                axis.line.y.left = element_line(color = "black", linewidth = 0.5), 
+                axis.ticks.length  = unit(0.2, "cm"),
+                panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                axis.text = element_text(size=12))+
+
+          stat_pvalue_manual( data = data_mixed_ID, 
+                              mapping = aes(xmin = xmin, xmax = xmax, y.position = y.position, label = p.adj.signif),
+                               label = "p.adj.signif",
+                               hide.ns = TRUE,
+                               step.increase = 0.1,
+                               inherit.aes = FALSE) +
+          labs(fill = "Group")  # This is important to show the correct legend
+  
+}
+print(p)
+# File path to save the plot
+  file_name_cleaned <- clean_variable_name(varsplot_ID[i])
+  file_path <- paste0("plots/", file_name_cleaned, "_sn_Violin.pdf")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "pdf", width = 4, height = 6, units = "in")
+  file_path <- paste0("plots/", file_name_cleaned, "_sn_Violin.tiff")
+  # Save the plot in vector format (PDF)
+  ggsave(filename = file_path, plot = p, device = "tiff", width = 4, height = 6, units = "in")
+}
+```
